@@ -520,8 +520,11 @@ node *insert(node *root, int key, int value) {
 
   record_pointer = make_record(value);
 
-  if (root == NULL)
-    return start_new_tree(key, record_pointer);
+  // init: lock implemented in main.cpp
+  if (root == NULL) {
+    root = start_new_tree(key, record_pointer);
+    return root;
+  }
 
   leaf = find_leaf(root, key, false);
 
@@ -530,7 +533,9 @@ node *insert(node *root, int key, int value) {
     return root;
   }
 
-  return insert_into_leaf_after_splitting(root, leaf, key, record_pointer);
+  // if root node should be modified, lock the WHOLE tree
+  root = insert_into_leaf_after_splitting(root, leaf, key, record_pointer);
+  return root;
 }
 
 int get_neighbor_index(node *n) {
@@ -753,4 +758,23 @@ void destroy_tree_nodes(node *root) {
 node *destroy_tree(node *root) {
   destroy_tree_nodes(root);
   return NULL;
+}
+
+
+// decides which subtree the current insertion is trying to modify
+int find_top_level_subtree(node *root, int key) {
+  int i = 0;
+  while (i < root->num_keys) {
+    if (key >= root->keys[i])
+      i++;
+    else
+      break;
+  }
+  return i;
+}
+
+// check for insert space from the top level subtree,
+// if no space left, then root should be updated
+bool find_empty_space_in_path(node *subroot) {
+  return true;
 }

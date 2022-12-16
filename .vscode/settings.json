@@ -1,0 +1,9 @@
+{
+  "C_Cpp.default.configurationProvider": "ms-vscode.makefile-tools",
+  "files.associations": {
+    "__mutex_base": "cpp",
+    "chrono": "cpp",
+    "vector": "cpp"
+  },
+  "cSpell.words": ["subroot"]
+}

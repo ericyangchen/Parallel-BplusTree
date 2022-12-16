@@ -8,30 +8,86 @@
 #include <pthread.h>
 #include "utils.h"
 #include "btree.h"
-#define THREAD 4
+#define THREAD 1
 #define TASK_INSERT 0
 #define TASK_QUERY 1
 #define TASK_RANGE_QUERY 2
 
 using namespace std;
 
+bool test_all = false;
+bool test_insert = true;
+bool test_key = true;
+bool test_range = false;
+
 node *root = NULL;
 int job_idx = 0;
-std::mutex job_mutex;
 vector<int> key, value, query_keys;
 vector<pair<int,int> > query_pairs;
 vector<int> key_query_result, range_query_result;
 
+std::mutex root_mutex;
+
+bool WAIT_FOR_WRITE = false;
+bool branch_lock[DEFAULT_ORDER] = {false};
+
 void *worker(void *arg){
     int *type = (int *)arg;
     while(1){
-        job_mutex.lock();
-        int i = job_idx++;
-        job_mutex.unlock();
+        int i = __sync_fetch_and_add(&job_idx, 1);
+
         if(*type == TASK_INSERT){
             if(i >= key.size()) break;
-            root = insert(root, key[i], value[i]);
-        }else if(*type == TASK_QUERY){
+
+            // only one thread can init root (once)
+            if(root == NULL){
+                root_mutex.lock();
+                if(root == NULL){
+                    root = insert(root, key[i], value[i]);
+                    root->is_leaf = true;
+                    root_mutex.unlock();
+                    continue;
+                }
+                root_mutex.unlock();
+            }
+
+            if (root->num_keys < DEFAULT_ORDER - 1) {
+                root_mutex.lock();
+                root = insert(root, key[i], value[i]);
+                root_mutex.unlock();
+                continue;
+            }
+    
+            int subtree; // current subtree (0 ~ DEFAULT_ORDER - 1)
+            // wait for [BRANCH] critical session
+            do {
+                subtree = find_top_level_subtree(root, key[i]);
+            } while (WAIT_FOR_WRITE || !__sync_bool_compare_and_swap(&branch_lock[subtree], false, true));
+            // [BRANCH] critical session
+            if (!find_empty_space_in_path((node *)root->pointers[subtree])) {
+                // wait for [ROOT] critical session
+                while (!__sync_bool_compare_and_swap(&WAIT_FOR_WRITE, false, true));
+                bool all_branch_unlocked = false;
+                do {
+                    for (int i = 0; i < DEFAULT_ORDER; i++) {
+                        all_branch_unlocked = true;
+                        if (i != subtree && branch_lock[i] == true) {
+                            all_branch_unlocked = false;
+                            break;
+                        }
+                    }
+                } while (!all_branch_unlocked);
+                // [ROOT] critical session
+                root = insert(root, key[i], value[i]);
+                WAIT_FOR_WRITE = false;
+                // [ROOT] critical session end
+            } else {
+                root->pointers[subtree] = insert(root, key[i], value[i])->pointers[subtree];
+            }
+
+            branch_lock[subtree] = false;
+            // [BRANCH] critical session end
+        } else if (*type == TASK_QUERY) {
             if(i >= query_keys.size()) break;
             record *rec;
             rec = find(root, query_keys[i], false, NULL);
@@ -40,13 +96,13 @@ void *worker(void *arg){
             }else{
                 key_query_result[i] = rec->value;
             }
-        }else if(*type == TASK_RANGE_QUERY){
+        } else if (*type == TASK_RANGE_QUERY) {
             if(i >= query_pairs.size()) break;
             int num = find_range_maxvalue(root, query_pairs[i].first, query_pairs[i].second, false);
 		    range_query_result[i] = num;
         }
         
-        // if(i % 1000 == 0)cout << "insert count = " << i << endl;
+        if(i % 1000 == 0)cout << "insert count = " << i << endl;
         // cout << "insert(" << key[i] << ", " << value[i] << ")" << endl;
     }
     return NULL;
@@ -67,44 +123,49 @@ int main()
 
     chrono::steady_clock::time_point start = chrono::steady_clock::now();
     //Build index when index constructor is called
-    job_idx = 0;
-    for(int i = 0;i < 1;i++){
-        int type = TASK_INSERT;
-        if(pthread_create(&tid[i], NULL, worker, (void *) &type)){
-            cout << "[ERROR] Create thread " << i << " failed." << endl;
+    if (test_all || test_insert) {
+        job_idx = 0;
+        for(int i = 0;i < THREAD;i++){
+            int type = TASK_INSERT;
+            if(pthread_create(&tid[i], NULL, worker, (void *) &type)){
+                cout << "[ERROR] Create thread " << i << " failed." << endl;
+            }
         }
-    }
-    for(int i = 0;i < 1;i++){
-        pthread_join(tid[i], NULL);
+        for(int i = 0;i < THREAD;i++){
+            pthread_join(tid[i], NULL);
+        }
     }
 
     chrono::steady_clock::time_point built_index = chrono::steady_clock::now();
     //Query by key
-    job_idx = 0;
-    key_query_result.resize(query_keys.size());
-    for(int i = 0;i < THREAD;i++){
-        int type = TASK_QUERY;
-        if(pthread_create(&tid[i], NULL, worker, (void *) &type)){
-            cout << "[ERROR] Create thread " << i << " failed." << endl;
+    if (test_all || test_key) {
+        job_idx = 0;
+        key_query_result.resize(query_keys.size());
+        for(int i = 0;i < THREAD;i++){
+            int type = TASK_QUERY;
+            if(pthread_create(&tid[i], NULL, worker, (void *) &type)){
+                cout << "[ERROR] Create thread " << i << " failed." << endl;
+            }
         }
-    }
-    for(int i = 0;i < THREAD;i++){
-        pthread_join(tid[i], NULL);
+        for(int i = 0;i < THREAD;i++){
+            pthread_join(tid[i], NULL);
+        }
     }
     chrono::steady_clock::time_point key_query = chrono::steady_clock::now();
     //Query by range of key
-    job_idx = 0;
-    range_query_result.resize(query_pairs.size());
-    for(int i = 0;i < THREAD;i++){
-        int type = TASK_RANGE_QUERY;
-        if(pthread_create(&tid[i], NULL, worker, (void *) &type)){
-            cout << "[ERROR] Create thread " << i << " failed." << endl;
+    if (test_all || test_range) {
+        job_idx = 0;
+        range_query_result.resize(query_pairs.size());
+        for(int i = 0;i < THREAD;i++){
+            int type = TASK_RANGE_QUERY;
+            if(pthread_create(&tid[i], NULL, worker, (void *) &type)){
+                cout << "[ERROR] Create thread " << i << " failed." << endl;
+            }
+        }
+        for(int i = 0;i < THREAD;i++){
+            pthread_join(tid[i], NULL);
         }
     }
-    for(int i = 0;i < THREAD;i++){
-        pthread_join(tid[i], NULL);
-    }
-
     chrono::steady_clock::time_point range_query = chrono::steady_clock::now();
     //Free memory
 
