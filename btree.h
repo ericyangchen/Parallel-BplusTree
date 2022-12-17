@@ -67,5 +67,5 @@ node *remove (node *root, int key);
 
 // decides which subtree the current insertion is trying to modify
 int find_top_level_subtree(node *root, int key);
-bool find_empty_space_in_path(node *subroot);
+bool find_empty_space_in_path(node *subroot, int key);
 #endif

@@ -53,10 +53,14 @@ void *worker(void *arg){
 
             if (root->num_keys < DEFAULT_ORDER - 1) {
                 root_mutex.lock();
-                root = insert(root, key[i], value[i]);
+                if (root->num_keys < DEFAULT_ORDER - 1) {
+                    root = insert(root, key[i], value[i]);
+                    root_mutex.unlock();
+                    continue;
+                }
                 root_mutex.unlock();
-                continue;
             }
+
     
             int subtree; // current subtree (0 ~ DEFAULT_ORDER - 1)
             // wait for [BRANCH] critical session
@@ -64,7 +68,7 @@ void *worker(void *arg){
                 subtree = find_top_level_subtree(root, key[i]);
             } while (WAIT_FOR_WRITE || !__sync_bool_compare_and_swap(&branch_lock[subtree], false, true));
             // [BRANCH] critical session
-            if (!find_empty_space_in_path((node *)root->pointers[subtree])) {
+            if (!find_empty_space_in_path((node *)root->pointers[subtree], key[i])) {
                 // wait for [ROOT] critical session
                 while (!__sync_bool_compare_and_swap(&WAIT_FOR_WRITE, false, true));
                 bool all_branch_unlocked = false;
@@ -82,10 +86,13 @@ void *worker(void *arg){
                 WAIT_FOR_WRITE = false;
                 // [ROOT] critical session end
             } else {
+                cout << "in\n"; 
                 root->pointers[subtree] = insert(root, key[i], value[i])->pointers[subtree];
+                cout << "out\n"; 
             }
 
             branch_lock[subtree] = false;
+            cout << "ok\n"; 
             // [BRANCH] critical session end
         } else if (*type == TASK_QUERY) {
             if(i >= query_keys.size()) break;
@@ -102,7 +109,7 @@ void *worker(void *arg){
 		    range_query_result[i] = num;
         }
         
-        if(i % 1000 == 0)cout << "insert count = " << i << endl;
+        // if(i % 1000 == 0)cout << "insert count = " << i << endl;
         // cout << "insert(" << key[i] << ", " << value[i] << ")" << endl;
     }
     return NULL;

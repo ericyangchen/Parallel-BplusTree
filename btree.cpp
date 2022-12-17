@@ -775,6 +775,20 @@ int find_top_level_subtree(node *root, int key) {
 
 // check for insert space from the top level subtree,
 // if no space left, then root should be updated
-bool find_empty_space_in_path(node *subroot) {
-  return true;
+bool find_empty_space_in_path(node *subroot, int key) {
+  node *curr = subroot;
+  while (true) {
+    if (curr->num_keys < order - 1) {
+      return true;
+    }
+    else {
+        if (curr->is_leaf) return false;
+
+        int insertion_point = 0;
+        while (insertion_point < curr->num_keys && curr->keys[insertion_point] < key)
+          insertion_point++;
+
+        curr = (node *)curr->pointers[insertion_point];
+    }
+  }
 }
