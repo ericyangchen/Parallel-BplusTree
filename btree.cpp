@@ -763,14 +763,14 @@ node *destroy_tree(node *root) {
 
 // decides which subtree the current insertion is trying to modify
 int find_top_level_subtree(node *root, int key) {
-  int i = 0;
-  while (i < root->num_keys) {
-    if (key >= root->keys[i])
-      i++;
-    else
-      break;
-  }
-  return i;
+    int i = 0;
+    while (i < root->num_keys) {
+        if (key >= root->keys[i])
+            i++;
+        else
+            break;
+    }
+    return i;
 }
 
 // check for insert space from the top level subtree,
@@ -779,16 +779,27 @@ bool find_empty_space_in_path(node *subroot, int key) {
   node *curr = subroot;
   while (true) {
     if (curr->num_keys < order - 1) {
+      std::cout << "found space\n";
       return true;
     }
     else {
-        if (curr->is_leaf) return false;
+        if (curr->is_leaf) {
+          std::cout << "leaf no space\n";
+          return false;
+        }
 
         int insertion_point = 0;
-        while (insertion_point < curr->num_keys && curr->keys[insertion_point] < key)
+        std::cout << "not leaf\n";
+        print_tree(subroot);
+        
+        std::cout << curr->keys[0] << " key\n";
+        while (insertion_point < curr->num_keys && curr->keys[insertion_point] < key) {
+          std::cout << "isp " << insertion_point << std::endl;
           insertion_point++;
+        }
 
         curr = (node *)curr->pointers[insertion_point];
+        std::cout << "new curr\n";
     }
   }
 }

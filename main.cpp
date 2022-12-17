@@ -67,8 +67,11 @@ void *worker(void *arg){
             do {
                 subtree = find_top_level_subtree(root, key[i]);
             } while (WAIT_FOR_WRITE || !__sync_bool_compare_and_swap(&branch_lock[subtree], false, true));
+            
             // [BRANCH] critical session
+            cout << "start1" << endl;
             if (!find_empty_space_in_path((node *)root->pointers[subtree], key[i])) {
+                cout << "[ROOT] critical" << endl;
                 // wait for [ROOT] critical session
                 while (!__sync_bool_compare_and_swap(&WAIT_FOR_WRITE, false, true));
                 bool all_branch_unlocked = false;
